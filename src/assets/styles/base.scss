@@ -1,0 +1,68 @@
+// Utility classes
+
+.mt20 {
+  margin-top: 20px;
+}
+
+.ml12 {
+  margin-left: 3 * $base-gap;
+}
+.row-between {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.pointer {
+  cursor: pointer;
+}
+
+.disabled {
+  cursor: not-allowed !important;
+  color: $disabled-color;
+}
+
+.ellipsis {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+// Update Element UI default style
+
+// Adding margin for iconfont icon
+.el-button {
+  .iconfont {
+    margin-right: $base-gap * 2;
+    font-size: 12px;
+  }
+}
+
+.ee-dialog {
+  border-radius: 12px;
+}
+
+.ee-tabs.el-tabs {
+  .el-tabs__header {
+    .el-tabs__nav-wrap {
+      &::after {
+        content: none;
+      }
+
+      .el-tabs__item {
+        &.is-focus {
+          box-shadow: none;
+        }
+      }
+    }
+  }
+}
+
+.el-dropdown-menu {
+  margin-top: 0;
+  padding-bottom: 0;
+
+  .popper__arrow {
+    display: none;
+  }
+}

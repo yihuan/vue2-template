@@ -1,6 +1,6 @@
 <template>
   <div class="gantt-create-plan">
-    <el-input v-model="input" placeholder="" @input="handleInput" />
+    <el-input v-model="input" :placeholder="placeholder" @input="handleInput" />
     <span class="btn btn-cancel" @click="handleCancel">取消</span>
     <div class="btn btn-create" @click="handleConfirm">
       <span>创建</span>

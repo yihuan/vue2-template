@@ -387,7 +387,8 @@ export default {
                 this.onTaskChange(task.id, {
                   [column.name]: u.map((i) => i.code)
                 })
-              }
+              },
+              remoteMethod: task.personRemoteMethod
             }
           })
         case ColumnType.date:

@@ -1,11 +1,12 @@
 <template>
   <EeSelect
     v-model="selected"
-    class="gantt-task-states"
+    class="project-plan-states"
     :width="60"
     :filterable="false"
     :multiple="false"
-    :options="states"
+    :disabled="disabled"
+    :options="options"
     @change="handleChange"
     @popover-visible="handleVisible"
   >
@@ -20,11 +21,17 @@
 <script setup>
 import { reactive, computed, watchEffect, ref } from 'vue'
 import EeSelect from '@/components/common/EeSelect.vue'
-import { STATE_PROJECT_PLAN } from '@/constants/project.const'
 
 const props = defineProps({
   value: {
     type: Number
+  },
+  options: {
+    type: Array,
+    default: () => []
+  },
+  disabled: {
+    type: Boolean
   },
   change: {
     type: Function,
@@ -33,7 +40,6 @@ const props = defineProps({
 })
 const emit = defineEmits(['input', 'change'])
 
-const states = Object.values(STATE_PROJECT_PLAN)
 const state = reactive({
   isEdit: false,
   color: '',
@@ -50,7 +56,7 @@ const labelStyle = computed(() => ({
 
 watchEffect(() => {
   if (props.value) {
-    const s = states.find((x) => x.value === props.value)
+    const s = props.options.find((x) => x.value === props.value)
     state.label = s?.label || '--'
     state.color = s?.color || ''
     state.bgColor = s?.bgColor || ''
@@ -63,7 +69,7 @@ function handleClick() {
 }
 
 function handleChange(event) {
-  const s = states.find((x) => x.value == event)
+  const s = props.options.find((x) => x.value == event)
   state.color = s.color
   state.bgColor = s.bgColor
   state.label = s.label
@@ -83,7 +89,7 @@ function handleVisible(visible) {
 </script>
 
 <style lang="scss" scoped>
-.gantt-task-states {
+.project-plan-states {
   .label {
     width: 60px;
     height: 24px;

@@ -1,10 +1,10 @@
 <template>
   <div class="gantt-table-title">
-    <div class="title-left">
+    <div class="title-left" :style="titleStyle" @click="handleTitleClick">
       <div class="icon" :style="{ cursor: editable ? 'pointer' : 'default' }">
-        <img :src="typeIcon" />
+        <img :src="icon" />
       </div>
-      <div class="title" :style="{ cursor: editable ? 'pointer' : 'default' }">
+      <div class="title">
         <el-input
           v-if="editable"
           v-model="editTitle"
@@ -12,28 +12,24 @@
           @change="handleTitleUpdate"
         ></el-input>
         <BaseTooltip :content="title">
-          <span class="title__text ellipsis" @click="handleTitleClick">
+          <span class="title__text ellipsis" :style="titleTextStyle">
             {{ title }}
           </span>
         </BaseTooltip>
       </div>
       <BaseTooltip content="已逾期">
-        <img
-          v-if="showExpiredIcon && isExpired"
-          class="icon-risk"
-          :src="riskIcon"
-        />
+        <img v-if="isExpired" class="icon-risk" :src="riskIcon" />
       </BaseTooltip>
     </div>
     <div class="actions">
       <i
-        v-if="allowAdd && isParent"
+        v-if="showAdd"
         class="iconfont icon-icon-16-tianjia1 icon-add"
         title="快速创建任务"
         @click="handleAdd"
       />
       <i
-        v-if="allowRemove"
+        v-if="allowRemove && !disabled"
         class="iconfont icon-icon-16-shanchu icon-del"
         title="删除任务"
         @click="handleDelete"
@@ -47,21 +43,25 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import BaseTooltip from '@/components/common/BaseTooltip.vue'
+import { ITEM_TYPE_LIST } from '@/constants/item.const'
 
-const typeIcon = require('@/assets/icons/icon-project-plan.webp')
-const riskIcon = require('@/assets/icons/icon-type-risk.webp')
+const emit = defineEmits(['click', 'update'])
 
 const props = defineProps({
+  workType: {
+    // see ITEM_TYPE_LIST
+    type: Number,
+    default: 0
+  },
   title: {
     type: String
-  },
-  showExpiredIcon: {
-    type: Boolean,
-    default: true
   },
   parentId: {
     type: Number,
     default: 0
+  },
+  disabled: {
+    type: Boolean
   },
   allowAdd: {
     type: Boolean,
@@ -99,10 +99,25 @@ const props = defineProps({
     default: () => {}
   }
 })
-const emit = defineEmits(['click', 'update'])
+
+const icon = computed(
+  () =>
+    ITEM_TYPE_LIST[props.workType]?.icon ||
+    require('@/assets/icons/icon-project-plan.webp')
+)
+
+const riskIcon = require('@/assets/icons/icon-type-risk.webp')
 
 const editTitle = ref(props.title)
-const isParent = computed(() => props.parentId === 0)
+const showAdd = computed(() => {
+  return props.parentId === 0 && props.allowAdd && !props.disabled
+})
+const titleStyle = computed(() => {
+  return props.parentId === 0 ? { width: '202px' } : { width: '176px' }
+})
+const titleTextStyle = computed(() => {
+  return props.parentId === 0 ? { maxWidth: '170px' } : { maxWidth: '140px' }
+})
 
 watch(
   () => props.title,
@@ -149,7 +164,7 @@ $icon-size: 16px;
   .title-left {
     display: flex;
     align-items: center;
-    width: $title-width + $icon-size * 2;
+    cursor: pointer;
 
     .icon {
       & > img {
@@ -185,6 +200,7 @@ $icon-size: 16px;
   .actions {
     padding: 0 $base-gap * 2;
     display: none;
+    text-align: right;
 
     & > i {
       color: $icon-color-base;

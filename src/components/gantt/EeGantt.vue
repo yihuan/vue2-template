@@ -8,8 +8,15 @@
       :style="{ height: height + 'px' }"
     />
     <div class="btt" @click="handleToToday">
-      <i class="iconfont icon-icon-12-xialajiantou btt-icon" />
+      <i
+        v-show="showIcon"
+        class="iconfont icon-icon-12-xialajiantou btt-icon__left"
+      />
       <span class="btt-text">回到今天</span>
+      <i
+        v-show="!showIcon"
+        class="iconfont icon-icon-12-xialajiantou btt-icon__right"
+      />
     </div>
   </div>
 </template>
@@ -21,7 +28,8 @@ import Vue, {
   onMounted,
   onUnmounted,
   ref,
-  watchEffect
+  watchEffect,
+  computed
 } from 'vue'
 import { gantt } from 'dhtmlx-gantt'
 import has from 'lodash/has'
@@ -35,10 +43,12 @@ import {
   DRAG_DIRECTION,
   SORT,
   CUSTOM_CLASS,
-  OBJECT_TYPE
+  OBJECT_TYPE,
+  TIME_UNIT
 } from '@/constants/gantt.const'
 import { Message } from '@/utils/message.util'
-import { formatDate } from '@/utils/date.util'
+import { formatDate, isAfter, get } from '@/utils/date.util'
+import { UNIT } from '@/constants/date.const'
 
 const props = defineProps({
   loading: Boolean,
@@ -91,10 +101,12 @@ const props = defineProps({
   /**
    * Format:
    * [{
-   *  id: Number;
+   *  id: Number; // gantt 任务专用 id
+   *  baseId: Number; // 后端数据用的 id
    *  status: Number;
    *  title: Striing;
    *  endDate: String;
+   *  ancestors: Array; 懒加载的子任务层级超过1级就需要保存祖先id, eg: [0, 0-1, 0-1-1]
    * }]
    */
   milestones: {
@@ -134,6 +146,11 @@ const props = defineProps({
     type: Boolean,
     default: false
   },
+  // 水平滚动条
+  scrollX: {
+    type: Boolean,
+    default: false
+  },
   allowGridRowMerge: {
     type: Boolean,
     default: false
@@ -144,6 +161,12 @@ const props = defineProps({
   },
   allowRemoveOnBar: Boolean,
   showTooltip: {
+    // 任务的详情 tooltip 及 任务进度 0/0
+    type: Boolean,
+    default: true
+  },
+  showExpiredIcon: {
+    // title上是否需要显示 expired 图标
     type: Boolean,
     default: true
   },
@@ -165,24 +188,26 @@ const props = defineProps({
     type: Function,
     default: () => {}
   },
+  updateTask: {
+    type: Function,
+    default: () => {}
+  },
   deleteTask: {
     type: Function,
     default: () => {}
   },
   getPersons: Function
 })
-const emit = defineEmits(
-  'task-update',
-  'title-click',
-  'data-loaded',
-  'milestone-update'
-)
+const emit = defineEmits('title-click', 'data-loaded', 'milestone-update')
 
 const ganttContainer = ref(null)
 const ganttLoading = ref(false)
+const showIcon = ref(true)
+
 const imgCDNPath =
   'https://j1.58cdn.com.cn/arthurupload/teg/yunxiao/static/images/'
 const NEW_TASK_ID = 'newTask'
+const FILL_TASK_ID = 'fillTask'
 const MILESTONE_ID = 'milestoneId'
 const PSEUDO_CHILD_ID = 'pseudoChildId'
 const oneDayMilliseconds = 86400000
@@ -200,7 +225,7 @@ const SCALE_CONFIG = {
       format: '%d',
       css: (date) => {
         const cls = []
-        if (!gantt.isWorkTime({ date: date, unit: 'day' })) {
+        if (!gantt.isWorkTime({ date: date, unit: SCALE.DAY })) {
           cls.push('ee_gantt_weekend')
         }
 
@@ -214,7 +239,20 @@ const SCALE_CONFIG = {
   ],
   [SCALE.WEEK]: [
     { unit: SCALE.MONTH, step: 1, format: '%Y年%m月' },
-    { unit: SCALE.WEEK, step: 1, format: '%W' }
+    {
+      unit: SCALE.WEEK,
+      step: 1,
+      format: (date) => {
+        const weekDay = gantt.date.add(date, 1, TIME_UNIT.WEEK)
+        const endOfWeek = gantt.date.add(weekDay, -1, TIME_UNIT.DAY)
+        const startDay = get(UNIT.DATE, date)
+        const endDay = get(UNIT.DATE, endOfWeek)
+        return `${gantt.date.getWeek(date)}周(${String(startDay).padStart(
+          2,
+          '0'
+        )}-${String(endDay).padStart(2, '0')})`
+      }
+    }
   ],
   [SCALE.MONTH]: [
     { unit: SCALE.YEAR, step: 1, format: '%Y年' },
@@ -242,6 +280,10 @@ const defaultConfig = {
   columns: [],
   scales: SCALE_CONFIG[SCALE.DAY],
   open_tree_initially: props.expand,
+  drag_timeline: {
+    ignore: '.gantt_task_line, .gantt_task_link',
+    useKey: false
+  },
   // grid_elastic_columns: true,
   external_render: {
     isElement: (element) => {
@@ -272,6 +314,7 @@ const defaultConfig = {
         width: 1
       },
       {
+        css: 'scrollbar-horizon',
         rows: [
           { view: 'timeline', scrollX: 'scrollHor', scrollY: 'scrollVer' },
           { view: 'scrollbar', id: 'scrollHor', group: 'horizontal' }
@@ -283,7 +326,8 @@ const defaultConfig = {
 }
 const plugins = {
   marker: true,
-  tooltip: true
+  tooltip: true,
+  drag_timeline: true
 }
 
 // 指示线居中
@@ -297,21 +341,25 @@ const todayMarker = {
   css: 'ee_gantt_today'
 }
 
+const scrollXHeight = computed(() => {
+  return props.scrollX ? '4px' : '0px'
+})
+
 watchEffect(() => {
   ganttLoading.value = props.loading
 })
 
 watch(
   () => props.tasks,
-  (val) => {
-    loadData(val)
+  () => {
+    loadData()
   }
 )
 
 watch(
   () => props.milestones,
   () => {
-    loadData(props.tasks)
+    loadData()
   }
 )
 
@@ -319,6 +367,11 @@ watch(
   () => props.scale,
   (scale) => {
     gantt.config.scales = SCALE_CONFIG[scale] || SCALE_CONFIG[SCALE.DAY]
+    if (scale === SCALE.WEEK || scale === SCALE.MONTH) {
+      gantt.config.min_column_width = SIZE.MIN_COLUMN_WIDTH * 7
+    } else {
+      gantt.config.min_column_width = SIZE.MIN_COLUMN_WIDTH
+    }
     gantt.render()
     createMilestoneNodes()
   }
@@ -327,7 +380,7 @@ watch(
 onMounted(() => {
   ganttLoading.value = true
   initGantt()
-  loadData(props.tasks)
+  loadData()
 })
 
 onUnmounted(() => {
@@ -361,6 +414,8 @@ function initGantt() {
 
   initGanttEvents() // 事件
   initGanttTemplates() // 模版
+
+  processAfterInit()
 }
 
 // Reference: https://docs.dhtmlx.com/gantt/api__refs__gantt_events.html
@@ -379,6 +434,7 @@ function initGanttEvents() {
   gantt.attachEvent('onEmptyClick', handleEmptyClick)
   gantt.attachEvent('onGanttScroll', handleGanttScroll)
   gantt.attachEvent('onBeforeGanttRender', () => {
+    // Only display tooltips in timeline area
     const tooltips = gantt.ext.tooltips
     tooltips.tooltip.setViewport(gantt.$task_data)
   })
@@ -391,7 +447,7 @@ function initGanttTemplates() {
   }
 
   gantt.templates.timeline_cell_class = (task, date) => {
-    if (!gantt.isWorkTime({ date: date, unit: 'day' })) {
+    if (!gantt.isWorkTime({ date: date, unit: props.scale })) {
       return 'ee_gantt_weekend'
     }
   }
@@ -410,12 +466,6 @@ function initGanttTemplates() {
 
   gantt.templates.task_class = (start, end, task) => {
     return getTaskClass(task)
-  }
-
-  gantt.templates.tooltip_text = (start, end, task) => {
-    if (props.showTooltip && !hideTooltip(task)) {
-      return createTaskDetailCard(task)
-    }
   }
 
   gantt.templates.progress_text = (start, end, task) => {
@@ -465,45 +515,67 @@ function initGanttTemplates() {
 
     const sDate = formatDateToStr(start, '%Y年%m月%d日')
     const eDate = formatDateToStr(genEndDate(task), '%Y年%m月%d日')
-    const totalCompleted =
-      (task.completedIssue || 0) +
-      (task.completedBug || 0) +
-      (task.completedTask || 0)
-    const total =
-      (task.totalIssue || 0) + (task.totalBug || 0) + (task.totalTask || 0)
-
     const removeContainer = props.allowRemoveOnBar
       ? `<div id="task-${task.id}-remove-container"></div>`
       : ''
-    return task.id !== MILESTONE_ID
-      ? `${removeContainer}${sDate}-${eDate} ${totalCompleted}/${total}`
-      : ''
+    let rightsideText = `${removeContainer}${sDate}-${eDate}`
+
+    if (props.showTooltip) {
+      const totalCompleted =
+        (task.completedIssue || 0) +
+        (task.completedBug || 0) +
+        (task.completedTask || 0)
+      const total =
+        (task.totalIssue || 0) + (task.totalBug || 0) + (task.totalTask || 0)
+
+      rightsideText = `${rightsideText} ${totalCompleted}/${total}`
+    }
+
+    return task.id !== MILESTONE_ID ? rightsideText : ''
   }
 
   // @see https://docs.dhtmlx.com/gantt/desktop__tree_column.html
-  gantt.templates.grid_open = (item) => {
-    if (item.$open) {
-      return `<i data-task-index="${item.index}" class="gantt_tree_icon gantt_close iconfont icon-a-icon-8-xialajiantou3x"></i>`
+  gantt.templates.grid_open = (task) => {
+    if (task.loading) {
+      return `<i data-task-index="${task.index}" class="gantt-lazy-loading el-icon-loading"></i>`
     }
 
-    return `<i data-task-index="${item.index}" class="gantt_tree_icon gantt_open iconfont icon-icon-8-youjiantou"></i>`
+    if (task.$open) {
+      return `<i data-task-index="${task.index}" class="gantt_tree_icon gantt_close iconfont icon-a-icon-8-xialajiantou3x"></i>`
+    }
+
+    return `<i data-task-index="${task.index}" class="gantt_tree_icon gantt_open iconfont icon-icon-8-youjiantou"></i>`
   }
 }
 
-function loadData(tasks) {
+/**
+ * Something needs to be handled after initialization
+ */
+function processAfterInit() {
+  // Remove the built-in tooltip handler from tasks(not displaying tooltips)
+  gantt.ext.tooltips.detach(
+    '[' + gantt.config.task_attribute + ']:not(.gantt_task_row)'
+  )
+}
+
+function loadData() {
   try {
     ganttLoading.value = true
     gantt.clearAll()
 
-    const data = tasks?.reduce((pre, cur, index) => {
-      if (cur.hasChildren) {
+    const data = props.tasks?.reduce((pre, cur, index) => {
+      if (!cur.loaded && cur.hasChildren) {
         pre.push({
-          id: `${PSEUDO_CHILD_ID}_${index}`,
+          id: PSEUDO_CHILD_ID + cur.id,
           parent: cur.id
         })
       }
 
-      pre.push({ ...cur, index, end_date: formatDate(genEndDate(cur, 'plus')) })
+      pre.push({
+        ...cur,
+        index,
+        end_date: formatDate(genEndDate(cur, 'plus'))
+      })
 
       return pre
     }, [])
@@ -525,7 +597,11 @@ function loadData(tasks) {
       })
     }
 
+    // The last task for filling the rest of the gantt
+    data.push(createBasicTask(FILL_TASK_ID))
+
     gantt.parse({ data })
+    calcFillingHeight()
     // addMarker is not a function happened each time (not know why)
     gantt.addMarker && gantt.addMarker(todayMarker)
     gantt.showDate(new Date())
@@ -534,6 +610,17 @@ function loadData(tasks) {
   } catch (e) {
     console.error('gantt load data error:', e)
   }
+}
+
+/**
+ * Calculates height of filling the rest of gantt
+ * @returns {Number}
+ */
+function calcFillingHeight() {
+  // final height = props.height - ROW_HEIGHT * visibleTaskCount
+  const rowHeight = props.height - gantt.getVisibleTaskCount() * SIZE.ROW_HEIGHT
+  gantt.getTask(FILL_TASK_ID).row_height = rowHeight < 0 ? 0 : rowHeight
+  gantt.render()
 }
 
 /**
@@ -557,7 +644,7 @@ function createMilestoneNodes() {
       objectType: props.objectType,
       disabled: props.disabled,
       milestones,
-      updateMilestone: () => {
+      milestoneUpdate: () => {
         emit('milestone-update')
       }
     }
@@ -584,11 +671,15 @@ function parseDate(date) {
 
 // 更新 task @see https://docs.dhtmlx.com/gantt/api__gantt_updatetask.html
 function onTaskChange(task) {
-  updateTask(task)
-  emit('task-update', {
-    ...task,
-    end_date: genEndDate(task)
-  })
+  updateTaskInfo(task)
+  props
+    .updateTask({ ...task, end_date: genEndDate(task) })
+    .then((res) => {
+      res && updateExpiredInfo(task.id, res)
+    })
+    .catch(() => {
+      gantt.deleteTask(task.id)
+    })
 }
 
 /**
@@ -609,14 +700,15 @@ function createBasicTask(id, text = '未命名') {
 /**
  * Does not display task tooltip(detail card)
  * @param {Object} task
+ * @returns {Boolean}
  */
 function hideTooltip(task) {
-  return task.id === NEW_TASK_ID || task.id === MILESTONE_ID
+  return [NEW_TASK_ID, MILESTONE_ID, FILL_TASK_ID].includes(task.id)
 }
 
-function updateTask(task) {
+function updateTaskInfo(task) {
   const id = task.id
-  if (!id) return
+  if (!gantt.isTaskExists(id)) return
   const otask = gantt.getTask(task.id)
   const ntask = { ...otask, ...task }
   gantt.updateTask(id, ntask)
@@ -647,11 +739,6 @@ function createRemoveElement(taskId, type) {
 
   if (gantt.$barsAreaEle && taskId) {
     let taskRemove = gantt.$barsAreaEle.querySelector(`#task-${taskId}-remove`)
-
-    if (taskRemove != null) {
-      taskRemove.classList[type]('hidden')
-      return
-    }
 
     const container = gantt.$barsAreaEle.querySelector(
       `#task-${taskId}-remove-container`
@@ -709,6 +796,8 @@ function changeDragMask(id, mode, e) {
 }
 
 function handleColumnRender(task, column) {
+  if (task.id === FILL_TASK_ID) return ''
+
   if (task.id === NEW_TASK_ID) {
     if (column.type === COLUMN_TYPE.TITLE) {
       return new GanttComponent.GanttCreateProjectPlan({
@@ -767,6 +856,7 @@ function handleColumnRender(task, column) {
           isExpired: isTaskExpired(task),
           allowRemove: task.allowRemove,
           allowAdd: task.allowAdd,
+          showExpiredIcon: props.showExpiredIcon,
           editable: false,
           disabled: props.disabled,
           click: () => {
@@ -781,8 +871,9 @@ function handleColumnRender(task, column) {
           },
           delete: () => {
             ganttLoading.value = true
+            const taskId = task.baseId || task.id
             props
-              .deleteTask(task.id, task.parent === 0)
+              .deleteTask(taskId, task.parent === 0)
               .then(() => {
                 removeTask(NEW_TASK_ID)
                 gantt.deleteTask(task.id)
@@ -797,8 +888,8 @@ function handleColumnRender(task, column) {
       return new GanttComponent.GanttStateSelect({
         propsData: {
           value: task.status?.value || task.status,
-          options: props.states || task.status.options,
-          disabled: props.disabled || task.status.disabled,
+          options: props.states || task.status?.options,
+          disabled: props.disabled || task.status?.disabled,
           change: (value) => {
             ganttLoading.value = true
             task.status = value
@@ -829,7 +920,7 @@ function handleColumnRender(task, column) {
         propsData: {
           multiple: false,
           modelValue: modelValue,
-          disabled: props.disabled || task.leaderStatus == 1,
+          readonly: props.disabled || task.leaderStatus == 1,
           meishiCardAvailable: false,
           options,
           change: (u) => {
@@ -892,13 +983,10 @@ function handleBeforeTaskDrag(id, mode, e) {
  * @param {String} mode - the drag-and-drop mode ("resize", "progress", "move", "ignore")
  * @param {Event} e - a native event object
  */
-function handleAfterTaskDrag(id) {
+async function handleAfterTaskDrag(id) {
   const task = gantt.getTask(id)
-
-  emit('task-update', {
-    ...task,
-    end_date: genEndDate(task)
-  })
+  const res = await props.updateTask({ ...task, end_date: genEndDate(task) })
+  res && updateExpiredInfo(id, res)
 
   if (task.direction == DRAG_DIRECTION.RIGHT) {
     gantt.updateTask(id, {
@@ -924,6 +1012,19 @@ function handleAfterTaskDrag(id) {
   }
 }
 
+/**
+ * 更新过期信息
+ * @param {Number} id
+ * @param {Object} task
+ */
+function updateExpiredInfo(id, task) {
+  const updateTask = gantt.getTask(id)
+  gantt.updateTask(id, {
+    ...updateTask,
+    overTimeDays: task?.overTimeDays
+  })
+}
+
 function handleGridHeaderClick(_, e) {
   const el = e.target
   if (
@@ -940,44 +1041,111 @@ function handleTaskClick(id, e) {
 
   if (el.classList.contains('title__text')) {
     removeTask(NEW_TASK_ID)
+    return
   }
 
-  // 点击图标展开任务
-  if (el.classList.contains(CUSTOM_CLASS.ganttOpen)) {
-    try {
-      const currentTask = gantt.getTask(id)
-      const taskIndex = el.dataset['taskIndex'] // 子任务的 index 从该位置开始计算
-      const pseudoTaskId = `${PSEUDO_CHILD_ID}_${taskIndex}`
+  if (!gantt.isTaskExists(id)) return
 
-      if (props.lazy && taskIndex) {
-        props
-          .load({
-            index: taskIndex,
-            projectId: currentTask?.projectId,
-            baseId: id
-          })
-          .then(() => {
-            removeTask(pseudoTaskId)
-            gantt.open(id)
-          })
-          .catch((e) => {
-            Message.error('展开失败，请刷新重试!')
-            console.error('展开工作项 error: %o', e)
-          })
-      } else {
-        gantt.open(id)
+  showTaskDetail(gantt.getTask(id), e)
+
+  // 点击图标展开
+  if (el.classList.contains(CUSTOM_CLASS.ganttOpen)) {
+    const task = gantt.getTask(id)
+
+    try {
+      // 不需要 lazy load 或 已经从后端加载过
+      if (!props.lazy || task.loaded) {
+        openTree([id])
       }
-      return
+
+      // 加载子任务
+      if (props.lazy && !task.loaded) {
+        loadChild(task)
+      }
     } catch (e) {
       Message.error('展开失败，请刷新重试!')
       console.error('展开工作项 error: %o', e)
     }
-  }
-  // 点击图标折叠任务
-  if (el.classList.contains(CUSTOM_CLASS.ganttClose)) {
-    gantt.close(id)
+
     return
   }
+
+  // 点击图标折叠
+  if (el.classList.contains(CUSTOM_CLASS.ganttClose)) {
+    closeTree([id])
+    return
+  }
+}
+
+/**
+ * Show task details(tooltip)
+ * https://docs.dhtmlx.com/gantt/desktop__tooltips.html
+ * @param {Object} task
+ * @param {Object} event - Click event
+ */
+function showTaskDetail(task, event) {
+  if (task && props.showTooltip && !hideTooltip(task)) {
+    gantt.ext.tooltips.tooltip.setContent(createTaskDetailCard(task))
+    gantt.ext.tooltips.tooltip.show(event)
+  }
+}
+
+function loadChild(task) {
+  const ancestors = JSON.parse(JSON.stringify(task.ancestors))
+
+  updateTaskInfo({ ...task, loading: true })
+  ancestors.push(task.id)
+
+  props
+    .load({
+      ancestors,
+      index: task?.index,
+      projectId: task?.projectId,
+      baseId: task?.baseId
+    })
+    .then(() => {
+      removeTask(`${PSEUDO_CHILD_ID}-${task.id}`)
+      openTree([...task?.ancestors, task?.id])
+    })
+    .catch((e) => {
+      // Message.error('展开失败，请刷新重试!')
+      console.error('展开工作项 error: %o', e)
+    })
+}
+
+/**
+ * 逐级打开任务
+ * @param {Array} treeIds, eg: [ancestor1, ancestor1-1, ancestor1-1-1]
+ */
+function openTree(treeIds) {
+  if (!treeIds) return
+
+  for (let i = 0; i < treeIds.length; i++) {
+    const taskId = treeIds[i]
+
+    if (gantt.isTaskExists(taskId)) {
+      gantt.open(taskId)
+    }
+  }
+  calcFillingHeight()
+}
+
+/**
+ * 关闭任务
+ * @param {Array} treeIds, eg: [ancestor1, ancestor1-1, ancestor1-1-1]
+ */
+function closeTree(treeIds) {
+  for (let i = 0; i < treeIds.length; i++) {
+    const taskId = treeIds[i]
+    const task = gantt.getTask(taskId)
+
+    if (gantt.isTaskExists(taskId)) {
+      // ancestors: 重置祖先关系
+      props.lazy && updateTaskInfo({ ...task, ancestors: [] })
+      gantt.close(taskId)
+    }
+  }
+  calcFillingHeight()
 }
 
 function handleMouseMove(id, e) {
@@ -987,14 +1155,6 @@ function handleMouseMove(id, e) {
   if (rowElement && rowElement.classList.contains('gantt_task_row')) {
     const taskId = rowElement.dataset['taskId']
     const taskRowNode = gantt.getTaskRowNode(taskId)
-
-    if (gantt.$previousRemoveId != taskId) {
-      if (gantt.$previousRemoveId) {
-        createRemoveElement(gantt.$previousRemoveId, 'add')
-      }
-      gantt.$previousRemoveId = taskId
-      createRemoveElement(taskId, 'remove')
-    }
 
     //hover grid task row
     if (gantt.$previousRowNode != taskRowNode) {
@@ -1035,6 +1195,13 @@ function handleMouseMove(id, e) {
 }
 
 function handleGanttScroll(left) {
+  const date = gantt.dateFromPos(left)
+  if (isAfter(date, new Date(), UNIT.DATE)) {
+    showIcon.value = false
+  } else {
+    showIcon.value = true
+  }
+
   if (gantt.$leftPos != left) {
     // do something
     gantt.$leftPos = left
@@ -1046,10 +1213,11 @@ function handleEmptyClick(e) {
 
   const el = e.target
   const parentNode = el.parentElement || el.parentNode
-  const taskId = parentNode.dataset['taskId']
+  const taskId = parentNode?.dataset['taskId']
   if (!taskId) return
 
   const task = gantt.getTask(taskId)
+  if (task.id === FILL_TASK_ID) return
 
   if (!task.unscheduled && task.start_date && task.end_date) {
     gantt.showDate(task.start_date)
@@ -1087,7 +1255,7 @@ function formatDateToStr(date, formatStr) {
 
 function createTaskDetailCard(task) {
   return `
-    <div class="task-item-progress">
+    <div id="${task.id}" class="task-item-progress">
       <div class="title"><span>${task.text}</span></div>
       <div class="progress-bars">
         <div class="bar-item">
@@ -1146,18 +1314,33 @@ function getTaskClass(task) {
   }
 }
 
+/**
+ * 判断任务是否过期
+ * @param {Object} task
+ * @returns {Boolean}
+ */
 function isTaskExpired(task) {
-  if (
-    task.unscheduled || // 未分配的
-    !task.end_date ||
-    task.status === STATE_PROJECT_PLAN.FINISHED.value
-  ) {
-    return false
-  }
+  // 事项管理专用，通过后端来判断是否过期
+  if (task.baseId) {
+    // 如果有这个字段的则根据这个字段来判断是否过期
+    if (task?.overTimeDays) {
+      return true
+    } else {
+      return false
+    }
+  } else {
+    if (
+      task.unscheduled || // 未分配的
+      !task.end_date ||
+      task.status === STATE_PROJECT_PLAN.FINISHED.value
+    ) {
+      return false
+    }
 
-  const today = gantt.date.date_part(new Date())
-  const endDate = gantt.date.date_part(genEndDate(task))
-  return endDate.getTime() < today.getTime()
+    const today = gantt.date.date_part(new Date())
+    const endDate = gantt.date.date_part(genEndDate(task))
+    return endDate.getTime() < today.getTime()
+  }
 }
 
 // 拖拽时修正 gantt 显示的日期
@@ -1207,6 +1390,8 @@ function removeTask(taskId) {
 <style lang="scss">
 // @see https://docs.dhtmlx.com/gantt/desktop__css_overview.html
 $milestone-title-height: 40px;
+$border-color: #ebebeb;
+$new-task-height: 50px;
 
 /**
   Gantt css structure
@@ -1253,7 +1438,7 @@ $milestone-title-height: 40px;
     align-items: center;
     cursor: pointer;
 
-    .btt-icon {
+    .btt-icon__left {
       font-size: 12px;
       color: #ffffff;
       transform: rotate(90deg);
@@ -1266,6 +1451,13 @@ $milestone-title-height: 40px;
       font-weight: 400;
       height: 16px;
       line-height: 16px;
+    }
+
+    .btt-icon__right {
+      font-size: 12px;
+      color: #ffffff;
+      transform: rotate(-90deg);
+      margin-left: $base-gap;
     }
   }
 
@@ -1291,8 +1483,12 @@ $milestone-title-height: 40px;
         }
 
         .gantt_grid_data {
+          .gantt_row_task[task_id='fillTask'] {
+            background-color: #ffffff;
+          }
+
           .gantt_row_task[task_id='newTask'] {
-            height: 50px !important;
+            height: $new-task-height !important;
             z-index: 58;
             right: 0;
 
@@ -1361,6 +1557,15 @@ $milestone-title-height: 40px;
         z-index: 999;
         border: none;
       }
+
+      // Scrollbar
+      .gantt_layout_cell.scrollHor_cell {
+        .gantt_layout_content {
+          .gantt_layout_cell.gantt_hor_scroll {
+            height: v-bind(scrollXHeight) !important;
+          }
+        }
+      }
     }
   }
 }
@@ -1386,6 +1591,11 @@ $milestone-title-height: 40px;
     width: 0;
   }
 }
+
+.gantt_layout_cell_border_right {
+  border-right-color: $border-color;
+}
+
 .gantt_grid_head_cell {
   .ee_gantt_sort {
     position: absolute;
@@ -1414,8 +1624,13 @@ $milestone-title-height: 40px;
   border-bottom: none;
 
   &.gantt_selected {
+    &[task_id='fillTask'] {
+      .gantt_task_cell {
+        background-color: #ffffff;
+      }
+    }
     .gantt_task_cell {
-      border-right-color: #ebebeb;
+      border-right-color: $border-color;
     }
   }
   // Milestones row
@@ -1466,6 +1681,16 @@ $milestone-title-height: 40px;
         width: 0;
       }
     }
+  }
+
+  &:hover {
+    .gantt_side_content.gantt_right {
+      display: block;
+    }
+  }
+
+  .gantt_side_content.gantt_right {
+    display: none;
   }
 
   // 光标指示器
@@ -1531,12 +1756,7 @@ $milestone-title-height: 40px;
 
   .ee_task_remove {
     color: #ed675a;
-    visibility: visible;
     cursor: pointer;
-
-    &.hidden {
-      visibility: hidden;
-    }
   }
 
   .gantt_task_progress_wrapper {
@@ -1590,7 +1810,7 @@ $milestone-title-height: 40px;
 
 .ee_gantt_weekend {
   background: #f8f9fa !important;
-  border-bottom: 1px solid #cecece;
+  border-bottom: 1px solid $border-color;
 }
 
 .gantt_task_cell {

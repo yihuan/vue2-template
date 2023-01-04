@@ -102,7 +102,7 @@ const props = defineProps({
    * Format:
    * [{
    *  id: Number; // gantt 任务专用 id
-   *  baseId: Number; // 后端数据用的 id
+   *  baseId: Number; // 后端数据用的 id, lazy load 时需要提供
    *  status: Number;
    *  title: Striing;
    *  endDate: String;
@@ -327,7 +327,8 @@ const defaultConfig = {
 const plugins = {
   marker: true,
   tooltip: true,
-  drag_timeline: true
+  drag_timeline: true,
+  quick_info: true
 }
 
 // 指示线居中
@@ -335,7 +336,7 @@ const todayStart = gantt.date.day_start(new Date())
 const todayMarker = {
   start_date: gantt.date.add(
     todayStart,
-    halfDayMilliseconds / 1000 / 60 / 60,
+    halfDayMilliseconds / 1000 / 60 / 60 - 1, // 1 是 maker 这条线
     'hour'
   ),
   css: 'ee_gantt_today'
@@ -360,6 +361,13 @@ watch(
   () => props.milestones,
   () => {
     loadData()
+  }
+)
+
+watch(
+  () => props.height, // 高度变化，需重新计算
+  () => {
+    calcFillingHeight()
   }
 )
 
@@ -450,6 +458,19 @@ function initGanttTemplates() {
     if (!gantt.isWorkTime({ date: date, unit: props.scale })) {
       return 'ee_gantt_weekend'
     }
+  }
+
+  gantt.templates.quick_info_class = () => {
+    return 'task-details'
+  }
+  gantt.templates.quick_info_content = (start, end, task) => {
+    return createTaskDetailCard(task)
+  }
+  gantt.templates.quick_info_date = () => {
+    return ''
+  }
+  gantt.templates.quick_info_title = () => {
+    return ''
   }
 
   gantt.templates.grid_row_class = function (start, end, task) {
@@ -672,8 +693,10 @@ function parseDate(date) {
 // 更新 task @see https://docs.dhtmlx.com/gantt/api__gantt_updatetask.html
 function onTaskChange(task) {
   updateTaskInfo(task)
+  const ntask = gantt.getTask(task.id)
+
   props
-    .updateTask({ ...task, end_date: genEndDate(task) })
+    .updateTask({ ...ntask, end_date: genEndDate(task) })
     .then((res) => {
       res && updateExpiredInfo(task.id, res)
     })
@@ -734,31 +757,33 @@ function changeHighlight(el, type) {
   }
 }
 
-function createRemoveElement(taskId, type) {
+function createRemoveElement(taskId) {
   if (!props.allowRemoveOnBar) return
 
   if (gantt.$barsAreaEle && taskId) {
     let taskRemove = gantt.$barsAreaEle.querySelector(`#task-${taskId}-remove`)
 
-    const container = gantt.$barsAreaEle.querySelector(
-      `#task-${taskId}-remove-container`
-    )
+    if (taskRemove == null) {
+      const container = gantt.$barsAreaEle.querySelector(
+        `#task-${taskId}-remove-container`
+      )
 
-    taskRemove = new GanttComponent.GanttTaskRemove({
-      propsData: {
-        id: taskId,
-        remove: () => {
-          onTaskChange({
-            id: taskId,
-            start_date: '',
-            end_date: '',
-            unscheduled: true
-          })
+      taskRemove = new GanttComponent.GanttTaskRemove({
+        propsData: {
+          id: taskId,
+          remove: () => {
+            onTaskChange({
+              id: taskId,
+              start_date: '',
+              end_date: '',
+              unscheduled: true
+            })
+          }
         }
-      }
-    })
+      })
 
-    container && taskRemove.$mount(container)
+      container && taskRemove.$mount(container)
+    }
   }
 }
 
@@ -921,7 +946,6 @@ function handleColumnRender(task, column) {
           multiple: false,
           modelValue: modelValue,
           readonly: props.disabled || task.leaderStatus == 1,
-          meishiCardAvailable: false,
           options,
           change: (u) => {
             const [user] = u
@@ -1046,7 +1070,7 @@ function handleTaskClick(id, e) {
 
   if (!gantt.isTaskExists(id)) return
 
-  showTaskDetail(gantt.getTask(id), e)
+  showTaskDetail(gantt.getTask(id))
 
   // 点击图标展开
   if (el.classList.contains(CUSTOM_CLASS.ganttOpen)) {
@@ -1078,15 +1102,14 @@ function handleTaskClick(id, e) {
 }
 
 /**
- * Show task details(tooltip)
- * https://docs.dhtmlx.com/gantt/desktop__tooltips.html
+ * Show task details(Quick Info)
+ * @see https://docs.dhtmlx.com/gantt/desktop__quick_info.html (now)
+ * @see https://docs.dhtmlx.com/gantt/desktop__tooltips.html (before)
  * @param {Object} task
- * @param {Object} event - Click event
  */
-function showTaskDetail(task, event) {
+function showTaskDetail(task) {
   if (task && props.showTooltip && !hideTooltip(task)) {
-    gantt.ext.tooltips.tooltip.setContent(createTaskDetailCard(task))
-    gantt.ext.tooltips.tooltip.show(event)
+    gantt.ext.quickInfo.show(task.id)
   }
 }
 
@@ -1176,15 +1199,9 @@ function handleMouseMove(id, e) {
     }
   }
 
+  // fix bug: https://ee.58corp.com/w/bug/yunxiao-13229
+  createRemoveElement(id)
   if (id && gantt.$previous_id != id) {
-    if (gantt.$previousRemoveId != id) {
-      if (gantt.$previousRemoveId) {
-        createRemoveElement(gantt.$previousRemoveId, 'add')
-      }
-      gantt.$previousRemoveId = id
-      createRemoveElement(id, 'remove')
-    }
-
     if (gantt.$previous_id) {
       changeHighlight(null, 'remove')
     }
@@ -1552,6 +1569,104 @@ $new-task-height: 50px;
         }
       }
 
+      .gantt_layout_cell.timeline_cell {
+        .gantt_task {
+          .gantt_cal_quick_info.task-details {
+            border: none;
+            width: auto;
+
+            .gantt_cal_qi_title {
+              border-radius: 0;
+              border: none;
+            }
+
+            .gantt_cal_qi_content {
+              .task-item-progress {
+                width: 200px;
+
+                .title {
+                  margin-bottom: $base-gap * 6;
+                  max-width: 200px;
+                  white-space: nowrap;
+                  overflow: hidden;
+                  text-overflow: ellipsis;
+
+                  & > span {
+                    color: $font-color;
+                    font-size: $font-size;
+                    font-weight: 500;
+                  }
+                }
+
+                .progress-bars {
+                  .bar-item {
+                    display: flex;
+                    align-items: center;
+                    margin: $base-gap * 3 0;
+
+                    & > span {
+                      flex: 0 0 60px;
+                      font-weight: 500;
+                      color: $font-color;
+                      font-size: $font-size;
+
+                      &:last-child {
+                        margin-left: $base-gap * 2;
+                        color: $secondary-text-color;
+                      }
+                    }
+
+                    .progress-bar {
+                      position: relative;
+                      width: 100%;
+                      height: 6px;
+                      border-radius: 100px;
+                      overflow: hidden;
+                      vertical-align: middle;
+
+                      &__inner {
+                        position: absolute;
+                        left: 0;
+                        top: 0;
+                        height: 100%;
+                      }
+
+                      &.req {
+                        background-color: #d2e1ff;
+
+                        .progress-bar__inner {
+                          background-color: #84adff;
+                        }
+                      }
+
+                      &.task {
+                        background-color: #b8efd5;
+
+                        .progress-bar__inner {
+                          background-color: #2cc085;
+                        }
+                      }
+
+                      &.bug {
+                        background-color: #ffe4d0;
+
+                        .progress-bar__inner {
+                          background-color: #ffcc99;
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+
+            .gantt_cal_qi_controls {
+              display: none;
+            }
+          }
+        }
+      }
+
       .ee-gantt-date-car {
         position: absolute;
         z-index: 999;
@@ -1831,85 +1946,5 @@ $new-task-height: 50px;
 .gantt_cal_cover,
 .gantt_cal_light {
   display: none !important;
-}
-
-.gantt_tooltip {
-  .task-item-progress {
-    width: 200px;
-
-    .title {
-      margin-bottom: $base-gap * 6;
-      max-width: 200px;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-
-      & > span {
-        color: $font-color;
-        font-size: $font-size;
-        font-weight: 500;
-      }
-    }
-
-    .progress-bars {
-      .bar-item {
-        display: flex;
-        align-items: center;
-        margin: $base-gap * 3 0;
-
-        & > span {
-          flex: 0 0 60px;
-          font-weight: 500;
-          color: $font-color;
-          font-size: $font-size;
-
-          &:last-child {
-            margin-left: $base-gap * 2;
-            color: $secondary-text-color;
-          }
-        }
-
-        .progress-bar {
-          position: relative;
-          width: 100%;
-          height: 6px;
-          border-radius: 100px;
-          overflow: hidden;
-          vertical-align: middle;
-
-          &__inner {
-            position: absolute;
-            left: 0;
-            top: 0;
-            height: 100%;
-          }
-
-          &.req {
-            background-color: #d2e1ff;
-
-            .progress-bar__inner {
-              background-color: #84adff;
-            }
-          }
-
-          &.task {
-            background-color: #b8efd5;
-
-            .progress-bar__inner {
-              background-color: #2cc085;
-            }
-          }
-
-          &.bug {
-            background-color: #ffe4d0;
-
-            .progress-bar__inner {
-              background-color: #ffcc99;
-            }
-          }
-        }
-      }
-    }
-  }
 }
 </style>

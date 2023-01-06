@@ -213,6 +213,7 @@ const PSEUDO_CHILD_ID = 'pseudoChildId'
 const oneDayMilliseconds = 86400000
 const halfDayMilliseconds = oneDayMilliseconds / 2
 const MILESTONE_HEIGHT = 40
+const specialIds = [NEW_TASK_ID, FILL_TASK_ID, MILESTONE_ID]
 
 // @see https://docs.dhtmlx.com/gantt/desktop__configuring_time_scale.html
 // @see https://docs.dhtmlx.com/gantt/desktop__date_format.html
@@ -324,6 +325,9 @@ const defaultConfig = {
     ]
   }
 }
+
+// QuickInfo: https://docs.dhtmlx.com/gantt/desktop__quick_info.html
+// Tooltip: https://docs.dhtmlx.com/gantt/desktop__tooltips.html
 const plugins = {
   marker: true,
   tooltip: true,
@@ -460,10 +464,12 @@ function initGanttTemplates() {
     }
   }
 
-  gantt.templates.quick_info_class = () => {
+  gantt.templates.quick_info_class = (start, end, task) => {
+    if (isSpecialTasks(task.id)) return 'hidden-task'
     return 'task-details'
   }
   gantt.templates.quick_info_content = (start, end, task) => {
+    if (isSpecialTasks(task.id)) return ''
     return createTaskDetailCard(task)
   }
   gantt.templates.quick_info_date = () => {
@@ -726,7 +732,11 @@ function createBasicTask(id, text = '未命名') {
  * @returns {Boolean}
  */
 function hideTooltip(task) {
-  return [NEW_TASK_ID, MILESTONE_ID, FILL_TASK_ID].includes(task.id)
+  return isSpecialTasks(task.id)
+}
+
+function isSpecialTasks(id) {
+  return specialIds.includes(id)
 }
 
 function updateTaskInfo(task) {
@@ -1571,97 +1581,103 @@ $new-task-height: 50px;
 
       .gantt_layout_cell.timeline_cell {
         .gantt_task {
-          .gantt_cal_quick_info.task-details {
-            border: none;
-            width: auto;
-
-            .gantt_cal_qi_title {
-              border-radius: 0;
-              border: none;
+          .gantt_cal_quick_info {
+            &.hidden-task {
+              display: none;
             }
 
-            .gantt_cal_qi_content {
-              .task-item-progress {
-                width: 200px;
+            &.task-details {
+              border: none;
+              width: auto;
 
-                .title {
-                  margin-bottom: $base-gap * 6;
-                  max-width: 200px;
-                  white-space: nowrap;
-                  overflow: hidden;
-                  text-overflow: ellipsis;
+              .gantt_cal_qi_title {
+                border-radius: 0;
+                border: none;
+              }
 
-                  & > span {
-                    color: $font-color;
-                    font-size: $font-size;
-                    font-weight: 500;
-                  }
-                }
+              .gantt_cal_qi_content {
+                .task-item-progress {
+                  width: 200px;
 
-                .progress-bars {
-                  .bar-item {
-                    display: flex;
-                    align-items: center;
-                    margin: $base-gap * 3 0;
+                  .title {
+                    margin-bottom: $base-gap * 6;
+                    max-width: 200px;
+                    white-space: nowrap;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
 
                     & > span {
-                      flex: 0 0 60px;
-                      font-weight: 500;
                       color: $font-color;
                       font-size: $font-size;
-
-                      &:last-child {
-                        margin-left: $base-gap * 2;
-                        color: $secondary-text-color;
-                      }
+                      font-weight: 500;
                     }
+                  }
 
-                    .progress-bar {
-                      position: relative;
-                      width: 100%;
-                      height: 6px;
-                      border-radius: 100px;
-                      overflow: hidden;
-                      vertical-align: middle;
+                  .progress-bars {
+                    .bar-item {
+                      display: flex;
+                      align-items: center;
+                      margin: $base-gap * 3 0;
 
-                      &__inner {
-                        position: absolute;
-                        left: 0;
-                        top: 0;
-                        height: 100%;
-                      }
+                      & > span {
+                        flex: 0 0 60px;
+                        font-weight: 500;
+                        color: $font-color;
+                        font-size: $font-size;
 
-                      &.req {
-                        background-color: #d2e1ff;
-
-                        .progress-bar__inner {
-                          background-color: #84adff;
+                        &:last-child {
+                          margin-left: $base-gap * 2;
+                          color: $secondary-text-color;
                         }
                       }
 
-                      &.task {
-                        background-color: #b8efd5;
+                      .progress-bar {
+                        position: relative;
+                        width: 100%;
+                        height: 6px;
+                        border-radius: 100px;
+                        overflow: hidden;
+                        vertical-align: middle;
 
-                        .progress-bar__inner {
-                          background-color: #2cc085;
+                        &__inner {
+                          position: absolute;
+                          left: 0;
+                          top: 0;
+                          height: 100%;
                         }
-                      }
 
-                      &.bug {
-                        background-color: #ffe4d0;
+                        &.req {
+                          background-color: #d2e1ff;
 
-                        .progress-bar__inner {
-                          background-color: #ffcc99;
+                          .progress-bar__inner {
+                            background-color: #84adff;
+                          }
+                        }
+
+                        &.task {
+                          background-color: #b8efd5;
+
+                          .progress-bar__inner {
+                            background-color: #2cc085;
+                          }
+                        }
+
+                        &.bug {
+                          background-color: #ffe4d0;
+
+                          .progress-bar__inner {
+                            background-color: #ffcc99;
+                          }
                         }
                       }
                     }
                   }
                 }
               }
-            }
 
-            .gantt_cal_qi_controls {
-              display: none;
+              .gantt_cal_qi_controls {
+                display: none;
+              }
             }
           }
         }

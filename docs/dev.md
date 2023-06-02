@@ -33,8 +33,8 @@
 
 - stores
   状态管理相关，当前项目中使用 `Pinia`。使用方法见：[Pinia 用法示例](./pinia.md)
-- uses
-  (Vue3 相关) Composable 方法相关，函数命名规范: `useXxx`，文件命名规范：`xxx.use.js`。
+- hooks
+  (Vue3 相关) Composable 方法相关，函数命名规范: `useXxx`，文件命名规范：`use-xxx.js`。
   详情参考 [Composables](https://vuejs.org/guide/reusability/composables.html)
 - utils
   一些工具类方法，比如防抖、节流等会放在 `app.util.js` 中。文件命名规范：`xx.util.js`。

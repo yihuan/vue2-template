@@ -2,6 +2,13 @@
 
 Vue 2.7 + Vue Router 3 + Pinia + ESLint + Prettier template project
 
+It contains:
+
+- Pinia installed
+- Vue, VueRouter and ElementUI and DTHMLX imported with CDN
+- API calling and url definition structure
+- SCSS support
+
 ## Local setup
 
 - Package manager：yarn

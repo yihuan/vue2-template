@@ -2,18 +2,16 @@
 
 Vue 2.7 + Vue Router 3 + Pinia + ESLint + Prettier template project
 
-## 项目启动
+## Local setup
 
-### 本地开发
-
-- 包管理工具：yarn
-- 本地安装：`yarn` or `yarn install`
-- 本地删除重新安装：`yarn reinstall`
-- 本地启动：`yarn start`
-- 编译打包：`yarn build`
+- Package manager：yarn
+- Install: `yarn` or `yarn install`
+- Reinstall: `yarn reinstall`
+- Local start: `yarn start`
+- Compile and build: `yarn build`
 - Lint：`yarn lint`
 
-## 文档说明
+## Documentation
 
 - [开发规范及相关](./docs/dev.md)
 - [Vue3 基础语法使用示例](./docs/vue3syntax.md)

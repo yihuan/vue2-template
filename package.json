@@ -54,9 +54,6 @@
     "last 2 versions",
     "not dead"
   ],
-  "engines": {
-    "node": "14.x"
-  },
   "gitHooks": {
     "pre-commit": "lint-staged"
   },

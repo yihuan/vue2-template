@@ -6,8 +6,7 @@ Vue 2.7 + Vue Router 3 + Pinia + ESLint + Prettier template project
 
 ### 本地开发
 
-- 包管理工具：yarn（建议，远程打包机器也是用的yarn）
-- Node 版本：14.19.2
+- 包管理工具：yarn
 - 本地安装：`yarn` or `yarn install`
 - 本地删除重新安装：`yarn reinstall`
 - 本地启动：`yarn start`
